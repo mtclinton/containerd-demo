@@ -7,15 +7,33 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/containerd/containerd/v2/pkg/cio"
 	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/pkg/oci"
 )
+
+type HtopContainerOpts func(ctx context.Context, client *containerd.Client, c *containers.Container) error
 
 func main() {
 	if err := redisExample(); err != nil {
 		log.Fatal(err)
+	}
+}
+func withHtop() oci.SpecOpts {
+	return withHtopFunc()
+}
+
+// WithHtop configures a container to monitor the host system via `htop`
+func withHtopFunc() oci.SpecOpts {
+	return func(ctx context.Context, client oci.Client, c *containers.Container, s *oci.Spec) error {
+		s.Process.Args = []string{"htop"}
+		// make sure we have a tty set for htop
+		if err := oci.WithTTY(ctx, client, c, s); err != nil {
+			return err
+		}
+		return nil
 	}
 }
 
@@ -35,6 +53,10 @@ func redisExample() error {
 	if err != nil {
 		return err
 	}
+	opts := []oci.SpecOpts{
+		oci.WithImageConfig(image),
+		withHtop(),
+	}
 
 	// create a container
 	container, err := client.NewContainer(
@@ -42,7 +64,7 @@ func redisExample() error {
 		"redis-server",
 		containerd.WithImage(image),
 		containerd.WithNewSnapshot("redis-server-snapshot", image),
-		containerd.WithNewSpec(oci.WithImageConfig(image)),
+		containerd.WithNewSpec(opts...),
 	)
 	if err != nil {
 		return err
